@@ -20,6 +20,9 @@ See the Mulan PSL v2 for more details. */
 #include "index/ix.h"
 #include "record_printer.h"
 
+#include <iomanip>
+#include <sstream>
+
 const char *help_info = "Supported SQL syntax:\n"
                    "  command ;\n"
                    "command:\n"
@@ -88,6 +91,11 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
             case T_ShowTable:
             {
                 sm_manager_->show_tables(context);
+                break;
+            }
+            case T_ShowIndex:
+            {
+                sm_manager_->show_index(x->tab_name_, context);
                 break;
             }
             case T_DescTable:
@@ -162,7 +170,9 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
             if (col.type == TYPE_INT) {
                 col_str = std::to_string(*(int *)rec_buf);
             } else if (col.type == TYPE_FLOAT) {
-                col_str = std::to_string(*(float *)rec_buf);
+                std::ostringstream oss;
+                oss << std::fixed << std::setprecision(6) << *(float *)rec_buf;
+                col_str = oss.str();
             } else if (col.type == TYPE_STRING) {
                 col_str = std::string((char *)rec_buf, col.len);
                 col_str.resize(strlen(col_str.c_str()));

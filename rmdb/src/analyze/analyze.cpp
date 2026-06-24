@@ -26,8 +26,13 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
 
         // 处理target list，再target list中添加上表名，例如 a.id
         for (auto &sv_sel_col : x->cols) {
-            TabCol sel_col = {.tab_name = sv_sel_col->tab_name, .col_name = sv_sel_col->col_name};
-            query->cols.push_back(sel_col);
+            if (auto agg = std::dynamic_pointer_cast<ast::AggFunc>(sv_sel_col)) {
+                TabCol sel_col = {.tab_name = "", .col_name = agg->alias};
+                query->cols.push_back(sel_col);
+            } else {
+                TabCol sel_col = {.tab_name = sv_sel_col->tab_name, .col_name = sv_sel_col->col_name};
+                query->cols.push_back(sel_col);
+            }
         }
         
         std::vector<ColMeta> all_cols;
@@ -41,6 +46,20 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         } else {
             // infer table name from column name
             for (auto &sel_col : query->cols) {
+                bool is_agg_alias = false;
+                for (auto &sv_sel_col : x->cols) {
+                    if (auto agg = std::dynamic_pointer_cast<ast::AggFunc>(sv_sel_col)) {
+                        if (agg->alias == sel_col.col_name) {
+                            is_agg_alias = true;
+                            if (!agg->is_star) {
+                                TabCol agg_col = {.tab_name = agg->col->tab_name, .col_name = agg->col->col_name};
+                                check_column(all_cols, agg_col);
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (is_agg_alias) continue;
                 sel_col = check_column(all_cols, sel_col);  // 列元数据校验
             }
         }
@@ -48,8 +67,21 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         get_clause(x->conds, query->conds);
         check_clause(query->tables, query->conds);
     } else if (auto x = std::dynamic_pointer_cast<ast::UpdateStmt>(parse)) {
-        /** TODO: */
-
+        std::vector<ColMeta> all_cols;
+        get_all_cols({x->tab_name}, all_cols);
+        for (auto &sv_set_clause : x->set_clauses) {
+            SetClause set_clause;
+            set_clause.lhs = check_column(all_cols, {.tab_name = x->tab_name, .col_name = sv_set_clause->col_name});
+            set_clause.rhs = convert_sv_value(sv_set_clause->val);
+            auto col = sm_manager_->db_.get_table(x->tab_name).get_col(set_clause.lhs.col_name);
+            if (set_clause.rhs.type != col->type) {
+                throw IncompatibleTypeError(coltype2str(col->type), coltype2str(set_clause.rhs.type));
+            }
+            set_clause.rhs.init_raw(col->len);
+            query->set_clauses.push_back(set_clause);
+        }
+        get_clause(x->conds, query->conds);
+        check_clause({x->tab_name}, query->conds);
     } else if (auto x = std::dynamic_pointer_cast<ast::DeleteStmt>(parse)) {
         //处理where条件
         get_clause(x->conds, query->conds);
@@ -85,7 +117,16 @@ TabCol Analyze::check_column(const std::vector<ColMeta> &all_cols, TabCol target
         target.tab_name = tab_name;
     } else {
         /** TODO: Make sure target column exists */
-        
+        bool found = false;
+        for (auto &col : all_cols) {
+            if (col.tab_name == target.tab_name && col.name == target.col_name) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            throw ColumnNotFoundError(target.tab_name + '.' + target.col_name);
+        }
     }
     return target;
 }

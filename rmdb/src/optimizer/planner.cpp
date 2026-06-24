@@ -22,16 +22,42 @@ See the Mulan PSL v2 for more details. */
 #include "index/ix.h"
 #include "record_printer.h"
 
-// 目前的索引匹配规则为：完全匹配索引字段，且全部为单点查询，不会自动调整where条件的顺序
 bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names) {
     index_col_names.clear();
-    for(auto& cond: curr_conds) {
-        if(cond.is_rhs_val && cond.op == OP_EQ && cond.lhs_col.tab_name.compare(tab_name) == 0)
-            index_col_names.push_back(cond.lhs_col.col_name);
-    }
     TabMeta& tab = sm_manager_->db_.get_table(tab_name);
-    if(tab.is_index(index_col_names)) return true;
-    return false;
+    size_t best_prefix = 0;
+    std::vector<std::string> best_cols;
+    for (auto &index : tab.indexes) {
+        size_t prefix = 0;
+        bool stopped = false;
+        for (auto &idx_col : index.cols) {
+            bool has_eq = false;
+            bool has_range = false;
+            for (auto &cond : curr_conds) {
+                if (!cond.is_rhs_val || cond.lhs_col.tab_name != tab_name || cond.lhs_col.col_name != idx_col.name) continue;
+                if (cond.op == OP_EQ) has_eq = true;
+                if (cond.op == OP_LT || cond.op == OP_LE || cond.op == OP_GT || cond.op == OP_GE) has_range = true;
+            }
+            if (has_eq) {
+                prefix++;
+                continue;
+            }
+            if (has_range) {
+                prefix++;
+                stopped = true;
+            }
+            break;
+        }
+        if (prefix > best_prefix) {
+            best_prefix = prefix;
+            best_cols.clear();
+            for (auto &col : index.cols) best_cols.push_back(col.name);
+        }
+        if (stopped) continue;
+    }
+    if (best_prefix == 0) return false;
+    index_col_names = std::move(best_cols);
+    return true;
 }
 
 /**
@@ -262,13 +288,34 @@ std::shared_ptr<Plan> Planner::generate_sort_plan(std::shared_ptr<Query> query, 
         const auto &sel_tab_cols = sm_manager_->db_.get_table(sel_tab_name).cols;
         all_cols.insert(all_cols.end(), sel_tab_cols.begin(), sel_tab_cols.end());
     }
-    TabCol sel_col;
-    for (auto &col : all_cols) {
-        if(col.name.compare(x->order->cols->col_name) == 0 )
-        sel_col = {.tab_name = col.tab_name, .col_name = col.name};
+    std::vector<TabCol> sel_cols;
+    std::vector<bool> is_descs;
+    for (auto &item : x->order->items) {
+        TabCol sel_col = {.tab_name = item->cols->tab_name, .col_name = item->cols->col_name};
+        if (sel_col.tab_name.empty()) {
+            std::string tab_name;
+            for (auto &col : all_cols) {
+                if (col.name == sel_col.col_name) {
+                    if (!tab_name.empty()) throw AmbiguousColumnError(sel_col.col_name);
+                    tab_name = col.tab_name;
+                }
+            }
+            if (tab_name.empty()) throw ColumnNotFoundError(sel_col.col_name);
+            sel_col.tab_name = tab_name;
+        } else {
+            bool found = false;
+            for (auto &col : all_cols) {
+                if (col.tab_name == sel_col.tab_name && col.name == sel_col.col_name) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) throw ColumnNotFoundError(sel_col.tab_name + '.' + sel_col.col_name);
+        }
+        sel_cols.push_back(sel_col);
+        is_descs.push_back(item->orderby_dir == ast::OrderBy_DESC);
     }
-    return std::make_shared<SortPlan>(T_Sort, std::move(plan), sel_col, 
-                                    x->order->orderby_dir == ast::OrderBy_DESC);
+    return std::make_shared<SortPlan>(T_Sort, std::move(plan), sel_cols, is_descs, x->limit);
 }
 
 
@@ -286,6 +333,42 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
     //物理优化
     auto sel_cols = query->cols;
     std::shared_ptr<Plan> plannerRoot = physical_optimization(query, context);
+    auto select = std::dynamic_pointer_cast<ast::SelectStmt>(query->parse);
+    std::vector<AggCall> agg_calls;
+    if (select != nullptr) {
+        for (auto &col : select->cols) {
+            if (auto agg = std::dynamic_pointer_cast<ast::AggFunc>(col)) {
+                AggCall call;
+                call.func_type = agg->func_type;
+                call.alias = agg->alias;
+                call.is_star = agg->is_star;
+                if (!agg->is_star) {
+                    call.col = {.tab_name = agg->col->tab_name, .col_name = agg->col->col_name};
+                    std::vector<ColMeta> all_cols;
+                    for (auto &tab_name : query->tables) {
+                        auto &tab_cols = sm_manager_->db_.get_table(tab_name).cols;
+                        all_cols.insert(all_cols.end(), tab_cols.begin(), tab_cols.end());
+                    }
+                    if (call.col.tab_name.empty()) {
+                        std::string tab_name;
+                        for (auto &meta : all_cols) {
+                            if (meta.name == call.col.col_name) {
+                                if (!tab_name.empty()) throw AmbiguousColumnError(call.col.col_name);
+                                tab_name = meta.tab_name;
+                            }
+                        }
+                        if (tab_name.empty()) throw ColumnNotFoundError(call.col.col_name);
+                        call.col.tab_name = tab_name;
+                    }
+                }
+                agg_calls.push_back(call);
+            }
+        }
+    }
+    if (!agg_calls.empty()) {
+        plannerRoot = std::make_shared<AggregatePlan>(T_Aggregate, std::move(plannerRoot), agg_calls);
+        return plannerRoot;
+    }
     plannerRoot = std::make_shared<ProjectionPlan>(T_Projection, std::move(plannerRoot), 
                                                         std::move(sel_cols));
 
@@ -296,7 +379,21 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
 std::shared_ptr<Plan> Planner::do_planner(std::shared_ptr<Query> query, Context *context)
 {
     std::shared_ptr<Plan> plannerRoot;
-    if (auto x = std::dynamic_pointer_cast<ast::CreateTable>(query->parse)) {
+    if (auto x = std::dynamic_pointer_cast<ast::Help>(query->parse)) {
+        plannerRoot = std::make_shared<OtherPlan>(T_Help, std::string());
+    } else if (auto x = std::dynamic_pointer_cast<ast::ShowTables>(query->parse)) {
+        plannerRoot = std::make_shared<OtherPlan>(T_ShowTable, std::string());
+    } else if (auto x = std::dynamic_pointer_cast<ast::DescTable>(query->parse)) {
+        plannerRoot = std::make_shared<OtherPlan>(T_DescTable, x->tab_name);
+    } else if (auto x = std::dynamic_pointer_cast<ast::TxnBegin>(query->parse)) {
+        plannerRoot = std::make_shared<OtherPlan>(T_Transaction_begin, std::string());
+    } else if (auto x = std::dynamic_pointer_cast<ast::TxnCommit>(query->parse)) {
+        plannerRoot = std::make_shared<OtherPlan>(T_Transaction_commit, std::string());
+    } else if (auto x = std::dynamic_pointer_cast<ast::TxnAbort>(query->parse)) {
+        plannerRoot = std::make_shared<OtherPlan>(T_Transaction_abort, std::string());
+    } else if (auto x = std::dynamic_pointer_cast<ast::TxnRollback>(query->parse)) {
+        plannerRoot = std::make_shared<OtherPlan>(T_Transaction_rollback, std::string());
+    } else if (auto x = std::dynamic_pointer_cast<ast::CreateTable>(query->parse)) {
         // create table;
         std::vector<ColDef> col_defs;
         for (auto &field : x->fields) {
@@ -313,6 +410,8 @@ std::shared_ptr<Plan> Planner::do_planner(std::shared_ptr<Query> query, Context 
     } else if (auto x = std::dynamic_pointer_cast<ast::DropTable>(query->parse)) {
         // drop table;
         plannerRoot = std::make_shared<DDLPlan>(T_DropTable, x->tab_name, std::vector<std::string>(), std::vector<ColDef>());
+    } else if (auto x = std::dynamic_pointer_cast<ast::ShowIndex>(query->parse)) {
+        plannerRoot = std::make_shared<OtherPlan>(T_ShowIndex, x->tab_name);
     } else if (auto x = std::dynamic_pointer_cast<ast::CreateIndex>(query->parse)) {
         // create index;
         plannerRoot = std::make_shared<DDLPlan>(T_CreateIndex, x->tab_name, x->col_names, std::vector<ColDef>());

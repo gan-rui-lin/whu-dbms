@@ -93,14 +93,13 @@ public:
         tot_len_ = *reinterpret_cast<const int*>(src + offset);
         offset += sizeof(int);
         first_free_page_no_ = *reinterpret_cast<const page_id_t*>(src + offset);
-        offset += sizeof(int);
+        offset += sizeof(page_id_t);
         num_pages_ = *reinterpret_cast<const int*>(src + offset);
         offset += sizeof(int);
         root_page_ = *reinterpret_cast<const page_id_t*>(src + offset);
         offset += sizeof(page_id_t);
         col_num_ = *reinterpret_cast<const int*>(src + offset);
         offset += sizeof(int);
-        std::cout << col_num_ << "\n";
         for(int i = 0; i < col_num_; ++i) {
             // col_types_[i] = *reinterpret_cast<const ColType*>(src + offset);
             ColType type = *reinterpret_cast<const ColType*>(src + offset);

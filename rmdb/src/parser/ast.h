@@ -32,6 +32,13 @@ enum OrderByDir {
     OrderBy_DESC
 };
 
+enum AggFuncType {
+    AGG_COUNT,
+    AGG_MAX,
+    AGG_MIN,
+    AGG_SUM
+};
+
 // Base class for tree nodes
 struct TreeNode {
     virtual ~TreeNode() = default;  // enable polymorphism
@@ -41,6 +48,12 @@ struct Help : public TreeNode {
 };
 
 struct ShowTables : public TreeNode {
+};
+
+struct ShowIndex : public TreeNode {
+    std::string tab_name;
+
+    ShowIndex(std::string tab_name_) : tab_name(std::move(tab_name_)) {}
 };
 
 struct TxnBegin : public TreeNode {
@@ -141,6 +154,20 @@ struct Col : public Expr {
             tab_name(std::move(tab_name_)), col_name(std::move(col_name_)) {}
 };
 
+struct AggFunc : public Col {
+    AggFuncType func_type;
+    std::shared_ptr<Col> col;
+    std::string alias;
+    bool is_star;
+
+    AggFunc(AggFuncType func_type_, std::shared_ptr<Col> col_, std::string alias_, bool is_star_ = false) :
+            Col("", std::move(alias_)),
+            func_type(func_type_),
+            col(std::move(col_)),
+            alias(std::move(col_name)),
+            is_star(is_star_) {}
+};
+
 struct SetClause : public TreeNode {
     std::string col_name;
     std::shared_ptr<Value> val;
@@ -158,12 +185,18 @@ struct BinaryExpr : public TreeNode {
             lhs(std::move(lhs_)), op(op_), rhs(std::move(rhs_)) {}
 };
 
-struct OrderBy : public TreeNode
+struct OrderByItem : public TreeNode
 {
     std::shared_ptr<Col> cols;
     OrderByDir orderby_dir;
-    OrderBy( std::shared_ptr<Col> cols_, OrderByDir orderby_dir_) :
+    OrderByItem( std::shared_ptr<Col> cols_, OrderByDir orderby_dir_) :
        cols(std::move(cols_)), orderby_dir(std::move(orderby_dir_)) {}
+};
+
+struct OrderBy : public TreeNode {
+    std::vector<std::shared_ptr<OrderByItem>> items;
+
+    OrderBy(std::vector<std::shared_ptr<OrderByItem>> items_) : items(std::move(items_)) {}
 };
 
 struct InsertStmt : public TreeNode {
@@ -213,14 +246,16 @@ struct SelectStmt : public TreeNode {
     
     bool has_sort;
     std::shared_ptr<OrderBy> order;
+    int limit;
 
 
     SelectStmt(std::vector<std::shared_ptr<Col>> cols_,
                std::vector<std::string> tabs_,
                std::vector<std::shared_ptr<BinaryExpr>> conds_,
-               std::shared_ptr<OrderBy> order_) :
+               std::shared_ptr<OrderBy> order_,
+               int limit_ = -1) :
             cols(std::move(cols_)), tabs(std::move(tabs_)), conds(std::move(conds_)), 
-            order(std::move(order_)) {
+            order(std::move(order_)), limit(limit_) {
                 has_sort = (bool)order;
             }
 };
@@ -257,6 +292,9 @@ struct SemValue {
     std::vector<std::shared_ptr<BinaryExpr>> sv_conds;
 
     std::shared_ptr<OrderBy> sv_orderby;
+    std::shared_ptr<OrderByItem> sv_orderby_item;
+    std::vector<std::shared_ptr<OrderByItem>> sv_orderby_items;
+    AggFuncType sv_agg_type;
 };
 
 extern std::shared_ptr<ast::TreeNode> parse_tree;

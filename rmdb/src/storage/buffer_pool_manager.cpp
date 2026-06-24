@@ -200,3 +200,23 @@ void BufferPoolManager::flush_all_pages(int fd) {
         page->is_dirty_ = false;
     }
 }
+
+void BufferPoolManager::delete_all_pages(int fd) {
+    std::scoped_lock lock{latch_};
+    for (auto it = page_table_.begin(); it != page_table_.end();) {
+        if (it->first.fd != fd) {
+            ++it;
+            continue;
+        }
+        frame_id_t frame_id = it->second;
+        Page *page = &pages_[frame_id];
+        disk_manager_->write_page(fd, it->first.page_no, page->data_, PAGE_SIZE);
+        replacer_->pin(frame_id);
+        page->reset_memory();
+        page->id_ = PageId{-1, INVALID_PAGE_ID};
+        page->pin_count_ = 0;
+        page->is_dirty_ = false;
+        free_list_.push_back(frame_id);
+        it = page_table_.erase(it);
+    }
+}

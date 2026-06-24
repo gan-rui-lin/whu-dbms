@@ -24,6 +24,33 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
 
     std::vector<Condition> fed_conds_;          // join条件
     bool isend;
+    std::unique_ptr<RmRecord> current_tuple_;
+
+    std::unique_ptr<RmRecord> join_tuple(const RmRecord *left_rec, const RmRecord *right_rec) {
+        auto rec = std::make_unique<RmRecord>(len_);
+        memcpy(rec->data, left_rec->data, left_->tupleLen());
+        memcpy(rec->data + left_->tupleLen(), right_rec->data, right_->tupleLen());
+        return rec;
+    }
+
+    void advance() {
+        current_tuple_ = nullptr;
+        while (!left_->is_end()) {
+            auto left_rec = left_->Next();
+            while (!right_->is_end()) {
+                auto right_rec = right_->Next();
+                auto joined = join_tuple(left_rec.get(), right_rec.get());
+                if (eval_conds(cols_, joined.get(), fed_conds_)) {
+                    current_tuple_ = std::move(joined);
+                    return;
+                }
+                right_->nextTuple();
+            }
+            left_->nextTuple();
+            if (!left_->is_end()) right_->beginTuple();
+        }
+        isend = true;
+    }
 
    public:
     NestedLoopJoinExecutor(std::unique_ptr<AbstractExecutor> left, std::unique_ptr<AbstractExecutor> right, 
@@ -44,16 +71,30 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     void beginTuple() override {
-
+        left_->beginTuple();
+        right_->beginTuple();
+        isend = false;
+        advance();
     }
 
     void nextTuple() override {
-        
+        if (isend) return;
+        right_->nextTuple();
+        advance();
     }
 
     std::unique_ptr<RmRecord> Next() override {
-        return nullptr;
+        if (current_tuple_ == nullptr) return nullptr;
+        return std::make_unique<RmRecord>(current_tuple_->size, current_tuple_->data);
     }
+
+    bool is_end() const override { return isend; }
+
+    size_t tupleLen() const override { return len_; }
+
+    const std::vector<ColMeta> &cols() const override { return cols_; }
+
+    ColMeta get_col_offset(const TabCol &target) override { return *get_col(cols_, target); }
 
     Rid &rid() override { return _abstract_rid; }
 };

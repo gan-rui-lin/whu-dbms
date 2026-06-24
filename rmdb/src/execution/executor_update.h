@@ -38,7 +38,51 @@ class UpdateExecutor : public AbstractExecutor {
         context_ = context;
     }
     std::unique_ptr<RmRecord> Next() override {
-        
+        for (auto &rid : rids_) {
+            auto old_rec = fh_->get_record(rid, context_);
+            RmRecord new_rec(old_rec->size, old_rec->data);
+            for (auto &set_clause : set_clauses_) {
+                auto col = tab_.get_col(set_clause.lhs.col_name);
+                memcpy(new_rec.data + col->offset, set_clause.rhs.raw->data, col->len);
+            }
+
+            for (auto &index : tab_.indexes) {
+                auto ih = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols)).get();
+                std::vector<char> new_key(index.col_tot_len);
+                std::vector<char> old_key(index.col_tot_len);
+                int offset = 0;
+                for (auto &col : index.cols) {
+                    memcpy(old_key.data() + offset, old_rec->data + col.offset, col.len);
+                    memcpy(new_key.data() + offset, new_rec.data + col.offset, col.len);
+                    offset += col.len;
+                }
+                if (memcmp(old_key.data(), new_key.data(), index.col_tot_len) != 0) {
+                    std::vector<Rid> result;
+                    if (ih->get_value(new_key.data(), &result, context_->txn_)) {
+                        std::vector<std::string> col_names;
+                        for (auto &col : index.cols) col_names.push_back(col.name);
+                        throw IndexExistsError(tab_name_, col_names);
+                    }
+                }
+            }
+
+            for (auto &index : tab_.indexes) {
+                auto ih = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols)).get();
+                std::vector<char> old_key(index.col_tot_len);
+                std::vector<char> new_key(index.col_tot_len);
+                int offset = 0;
+                for (auto &col : index.cols) {
+                    memcpy(old_key.data() + offset, old_rec->data + col.offset, col.len);
+                    memcpy(new_key.data() + offset, new_rec.data + col.offset, col.len);
+                    offset += col.len;
+                }
+                if (memcmp(old_key.data(), new_key.data(), index.col_tot_len) != 0) {
+                    ih->delete_entry(old_key.data(), context_->txn_);
+                    ih->insert_entry(new_key.data(), rid, context_->txn_);
+                }
+            }
+            fh_->update_record(rid, new_rec.data, context_);
+        }
         return nullptr;
     }
 

@@ -23,6 +23,7 @@ typedef enum PlanTag{
     T_Invalid = 1,
     T_Help,
     T_ShowTable,
+    T_ShowIndex,
     T_DescTable,
     T_CreateTable,
     T_DropTable,
@@ -40,6 +41,7 @@ typedef enum PlanTag{
     T_IndexScan,
     T_NestLoop,
     T_Sort,
+    T_Aggregate,
     T_Projection
 } PlanTag;
 
@@ -118,18 +120,42 @@ class ProjectionPlan : public Plan
 class SortPlan : public Plan
 {
     public:
-        SortPlan(PlanTag tag, std::shared_ptr<Plan> subplan, TabCol sel_col, bool is_desc)
+        SortPlan(PlanTag tag, std::shared_ptr<Plan> subplan, std::vector<TabCol> sel_cols,
+                 std::vector<bool> is_descs, int limit)
         {
             Plan::tag = tag;
             subplan_ = std::move(subplan);
-            sel_col_ = sel_col;
-            is_desc_ = is_desc;
+            sel_cols_ = std::move(sel_cols);
+            is_descs_ = std::move(is_descs);
+            limit_ = limit;
         }
         ~SortPlan(){}
         std::shared_ptr<Plan> subplan_;
-        TabCol sel_col_;
-        bool is_desc_;
+        std::vector<TabCol> sel_cols_;
+        std::vector<bool> is_descs_;
+        int limit_;
         
+};
+
+struct AggCall {
+    ast::AggFuncType func_type;
+    TabCol col;
+    std::string alias;
+    bool is_star;
+};
+
+class AggregatePlan : public Plan
+{
+    public:
+        AggregatePlan(PlanTag tag, std::shared_ptr<Plan> subplan, std::vector<AggCall> agg_calls)
+        {
+            Plan::tag = tag;
+            subplan_ = std::move(subplan);
+            agg_calls_ = std::move(agg_calls);
+        }
+        ~AggregatePlan(){}
+        std::shared_ptr<Plan> subplan_;
+        std::vector<AggCall> agg_calls_;
 };
 
 // dml语句，包括insert; delete; update; select语句　

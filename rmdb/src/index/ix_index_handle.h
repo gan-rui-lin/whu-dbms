@@ -92,7 +92,7 @@ class IxNodeHandle {
 
     bool is_leaf_page() { return page_hdr->is_leaf; }
 
-    bool is_root_page() { return get_parent_page_no() == INVALID_PAGE_ID; }
+    bool is_root_page() { return get_parent_page_no() == IX_NO_PAGE; }
 
     void set_next_leaf(page_id_t page_no) { page_hdr->next_leaf = page_no; }
 
