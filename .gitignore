@@ -8,7 +8,7 @@ refrence.zip
 reference.zip
 submissions/
 submissions_fixed/
-*_submit.zip
+# *_submit.zip
 *.rar
 *.tar
 
