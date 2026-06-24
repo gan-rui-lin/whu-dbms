@@ -52,7 +52,11 @@ void DiskManager::read_page(int fd, page_id_t page_no, char *offset, int num_byt
     while (total < num_bytes) {
         ssize_t bytes_read = pread(fd, offset + total, num_bytes - total, file_offset + total);
         if (bytes_read < 0 && errno == EINTR) continue;
-        if (bytes_read <= 0) throw InternalError("DiskManager::read_page Error");
+        if (bytes_read < 0) throw InternalError("DiskManager::read_page Error");
+        if (bytes_read == 0) {
+            memset(offset + total, 0, num_bytes - total);
+            break;
+        }
         total += static_cast<int>(bytes_read);
     }
 }
