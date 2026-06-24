@@ -74,9 +74,7 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
             set_clause.lhs = check_column(all_cols, {.tab_name = x->tab_name, .col_name = sv_set_clause->col_name});
             set_clause.rhs = convert_sv_value(sv_set_clause->val);
             auto col = sm_manager_->db_.get_table(x->tab_name).get_col(set_clause.lhs.col_name);
-            if (set_clause.rhs.type != col->type) {
-                throw IncompatibleTypeError(coltype2str(col->type), coltype2str(set_clause.rhs.type));
-            }
+            coerce_value_type(set_clause.rhs, col->type, col->len);
             set_clause.rhs.init_raw(col->len);
             query->set_clauses.push_back(set_clause);
         }
@@ -87,9 +85,15 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         get_clause(x->conds, query->conds);
         check_clause({x->tab_name}, query->conds);        
     } else if (auto x = std::dynamic_pointer_cast<ast::InsertStmt>(parse)) {
-        // 处理insert 的values值
-        for (auto &sv_val : x->vals) {
-            query->values.push_back(convert_sv_value(sv_val));
+        TabMeta &tab = sm_manager_->db_.get_table(x->tab_name);
+        if (x->vals.size() != tab.cols.size()) {
+            throw InvalidValueCountError();
+        }
+        for (size_t i = 0; i < x->vals.size(); ++i) {
+            Value value = convert_sv_value(x->vals[i]);
+            coerce_value_type(value, tab.cols[i].type, tab.cols[i].len);
+            value.init_raw(tab.cols[i].len);
+            query->values.push_back(value);
         }
     } else {
         // do nothing
@@ -172,6 +176,7 @@ void Analyze::check_clause(const std::vector<std::string> &tab_names, std::vecto
         ColType lhs_type = lhs_col->type;
         ColType rhs_type;
         if (cond.is_rhs_val) {
+            coerce_value_type(cond.rhs_val, lhs_col->type, lhs_col->len);
             cond.rhs_val.init_raw(lhs_col->len);
             rhs_type = cond.rhs_val.type;
         } else {
@@ -189,7 +194,7 @@ void Analyze::check_clause(const std::vector<std::string> &tab_names, std::vecto
 Value Analyze::convert_sv_value(const std::shared_ptr<ast::Value> &sv_val) {
     Value val;
     if (auto int_lit = std::dynamic_pointer_cast<ast::IntLit>(sv_val)) {
-        val.set_int(int_lit->val);
+        val.set_bigint(int_lit->val);
     } else if (auto float_lit = std::dynamic_pointer_cast<ast::FloatLit>(sv_val)) {
         val.set_float(float_lit->val);
     } else if (auto str_lit = std::dynamic_pointer_cast<ast::StringLit>(sv_val)) {

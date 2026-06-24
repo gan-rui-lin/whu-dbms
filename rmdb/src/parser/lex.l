@@ -13,6 +13,8 @@
 %{
 #include "ast.h"
 #include "yacc.tab.h"
+#include <cerrno>
+#include <cstdlib>
 #include <iostream>
 
 // automatically update location
@@ -74,9 +76,26 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "UPDATE" { return UPDATE; }
 "SET" { return SET; }
 "SELECT" { return SELECT; }
-"INT" { return INT; }
-"CHAR" { return CHAR; }
-"FLOAT" { return FLOAT; }
+"INT" {
+    ast::scanner_last_type = ast::SV_TYPE_INT;
+    return INT;
+}
+"BIGINT" {
+    ast::scanner_last_type = ast::SV_TYPE_BIGINT;
+    return INT;
+}
+"CHAR" {
+    ast::scanner_last_type = ast::SV_TYPE_STRING;
+    return CHAR;
+}
+"FLOAT" {
+    ast::scanner_last_type = ast::SV_TYPE_FLOAT;
+    return FLOAT;
+}
+"DATETIME" {
+    ast::scanner_last_type = ast::SV_TYPE_DATETIME;
+    return FLOAT;
+}
 "INDEX" { return INDEX; }
 "AND" { return AND; }
 "JOIN" {return JOIN;}
@@ -103,7 +122,13 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 }
     /* literals */
 {value_int} {
-    yylval->sv_int = atoi(yytext);
+    errno = 0;
+    char *end = nullptr;
+    long long parsed = strtoll(yytext, &end, 10);
+    if (errno == ERANGE) {
+        ast::scanner_int_out_of_range = true;
+    }
+    yylval->sv_int = parsed;
     return VALUE_INT;
 }
 {value_float} {

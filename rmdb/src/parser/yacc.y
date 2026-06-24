@@ -190,7 +190,11 @@ field:
 type:
         INT
     {
-        $$ = std::make_shared<TypeLen>(SV_TYPE_INT, sizeof(int));
+        if (ast::scanner_last_type == SV_TYPE_BIGINT) {
+            $$ = std::make_shared<TypeLen>(SV_TYPE_BIGINT, sizeof(int64_t));
+        } else {
+            $$ = std::make_shared<TypeLen>(SV_TYPE_INT, sizeof(int));
+        }
     }
     |   CHAR '(' VALUE_INT ')'
     {
@@ -198,7 +202,11 @@ type:
     }
     |   FLOAT
     {
-        $$ = std::make_shared<TypeLen>(SV_TYPE_FLOAT, sizeof(float));
+        if (ast::scanner_last_type == SV_TYPE_DATETIME) {
+            $$ = std::make_shared<TypeLen>(SV_TYPE_DATETIME, sizeof(int64_t));
+        } else {
+            $$ = std::make_shared<TypeLen>(SV_TYPE_FLOAT, sizeof(float));
+        }
     }
     ;
 

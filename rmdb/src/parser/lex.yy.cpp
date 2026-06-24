@@ -43,6 +43,7 @@
 /* begin standard C headers. */
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <errno.h>
 #include <stdlib.h>
 
@@ -1071,17 +1072,26 @@ YY_RULE_SETUP
 case 27:
 YY_RULE_SETUP
 #line 78 "lex.l"
-{ return INT; }
+{
+    ast::scanner_last_type = ast::SV_TYPE_INT;
+    return INT;
+}
 	YY_BREAK
 case 28:
 YY_RULE_SETUP
 #line 79 "lex.l"
-{ return CHAR; }
+{
+    ast::scanner_last_type = ast::SV_TYPE_STRING;
+    return CHAR;
+}
 	YY_BREAK
 case 29:
 YY_RULE_SETUP
 #line 80 "lex.l"
-{ return FLOAT; }
+{
+    ast::scanner_last_type = ast::SV_TYPE_FLOAT;
+    return FLOAT;
+}
 	YY_BREAK
 case 30:
 YY_RULE_SETUP
@@ -1153,12 +1163,12 @@ YY_RULE_SETUP
 #line 94 "lex.l"
 { return SUM; }
 	YY_BREAK
-/* operators */
 case 44:
 YY_RULE_SETUP
-#line 96 "lex.l"
+#line 95 "lex.l"
 { return GEQ; }
 	YY_BREAK
+/* operators */
 case 45:
 YY_RULE_SETUP
 #line 97 "lex.l"
@@ -1174,27 +1184,41 @@ YY_RULE_SETUP
 #line 99 "lex.l"
 { return yytext[0]; }
 	YY_BREAK
-/* id */
 case 48:
 YY_RULE_SETUP
-#line 101 "lex.l"
+#line 100 "lex.l"
 {
+    if (strcasecmp(yytext, "BIGINT") == 0) {
+        ast::scanner_last_type = ast::SV_TYPE_BIGINT;
+        return INT;
+    }
+    if (strcasecmp(yytext, "DATETIME") == 0) {
+        ast::scanner_last_type = ast::SV_TYPE_DATETIME;
+        return FLOAT;
+    }
     yylval->sv_str = yytext;
     return IDENTIFIER;
 }
 	YY_BREAK
-/* literals */
+/* id */
 case 49:
 YY_RULE_SETUP
-#line 106 "lex.l"
+#line 102 "lex.l"
 {
-    yylval->sv_int = atoi(yytext);
+    errno = 0;
+    char *end = nullptr;
+    long long parsed = strtoll(yytext, &end, 10);
+    if (errno == ERANGE) {
+        ast::scanner_int_out_of_range = true;
+    }
+    yylval->sv_int = parsed;
     return VALUE_INT;
 }
 	YY_BREAK
+/* literals */
 case 50:
 YY_RULE_SETUP
-#line 110 "lex.l"
+#line 116 "lex.l"
 {
     yylval->sv_float = atof(yytext);
     return VALUE_FLOAT;
@@ -1203,7 +1227,7 @@ YY_RULE_SETUP
 case 51:
 /* rule 51 can match eol */
 YY_RULE_SETUP
-#line 114 "lex.l"
+#line 120 "lex.l"
 {
     yylval->sv_str = std::string(yytext + 1, strlen(yytext) - 2);
     return VALUE_STRING;
@@ -1218,15 +1242,15 @@ case YY_STATE_EOF(STATE_COMMENT):
 /* unexpected char */
 case 52:
 YY_RULE_SETUP
-#line 121 "lex.l"
+#line 127 "lex.l"
 { std::cerr << "Lexer Error: unexpected character " << yytext[0] << std::endl; }
 	YY_BREAK
 case 53:
 YY_RULE_SETUP
-#line 122 "lex.l"
+#line 128 "lex.l"
 ECHO;
 	YY_BREAK
-#line 1230 "/home/hwt/桌面/sources/实验和项目类/数据库/whu-dbms/rmdb/src/parser/lex.yy.cpp"
+#line 1248 "/home/hwt/桌面/sources/实验和项目类/数据库/whu-dbms/rmdb/src/parser/lex.yy.cpp"
 
 	case YY_END_OF_BUFFER:
 		{
@@ -2193,5 +2217,3 @@ void yyfree (void * ptr )
 #define YYTABLES_NAME "yytables"
 
 #line 122 "lex.l"
-
-

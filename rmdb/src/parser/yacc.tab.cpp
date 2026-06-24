@@ -1857,7 +1857,11 @@ yyreduce:
   case 30: /* type: INT  */
 #line 192 "/home/hwt/桌面/sources/实验和项目类/数据库/whu-dbms/rmdb/src/parser/yacc.y"
     {
-        (yyval.sv_type_len) = std::make_shared<TypeLen>(SV_TYPE_INT, sizeof(int));
+        if (ast::scanner_last_type == SV_TYPE_BIGINT) {
+            (yyval.sv_type_len) = std::make_shared<TypeLen>(SV_TYPE_BIGINT, sizeof(int64_t));
+        } else {
+            (yyval.sv_type_len) = std::make_shared<TypeLen>(SV_TYPE_INT, sizeof(int));
+        }
     }
 #line 1863 "/home/hwt/桌面/sources/实验和项目类/数据库/whu-dbms/rmdb/src/parser/yacc.tab.cpp"
     break;
@@ -1873,7 +1877,11 @@ yyreduce:
   case 32: /* type: FLOAT  */
 #line 200 "/home/hwt/桌面/sources/实验和项目类/数据库/whu-dbms/rmdb/src/parser/yacc.y"
     {
-        (yyval.sv_type_len) = std::make_shared<TypeLen>(SV_TYPE_FLOAT, sizeof(float));
+        if (ast::scanner_last_type == SV_TYPE_DATETIME) {
+            (yyval.sv_type_len) = std::make_shared<TypeLen>(SV_TYPE_DATETIME, sizeof(int64_t));
+        } else {
+            (yyval.sv_type_len) = std::make_shared<TypeLen>(SV_TYPE_FLOAT, sizeof(float));
+        }
     }
 #line 1879 "/home/hwt/桌面/sources/实验和项目类/数据库/whu-dbms/rmdb/src/parser/yacc.tab.cpp"
     break;
@@ -2455,4 +2463,3 @@ yyreturnlab:
 }
 
 #line 423 "/home/hwt/桌面/sources/实验和项目类/数据库/whu-dbms/rmdb/src/parser/yacc.y"
-

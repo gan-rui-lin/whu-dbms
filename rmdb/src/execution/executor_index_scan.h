@@ -45,6 +45,9 @@ class IndexScanExecutor : public AbstractExecutor {
         } else if (col.type == TYPE_FLOAT) {
             float v = -std::numeric_limits<float>::max();
             memcpy(key + offset, &v, sizeof(float));
+        } else if (col.type == TYPE_BIGINT || col.type == TYPE_DATETIME) {
+            int64_t v = std::numeric_limits<int64_t>::min();
+            memcpy(key + offset, &v, sizeof(int64_t));
         } else {
             memset(key + offset, 0, col.len);
         }
@@ -57,6 +60,9 @@ class IndexScanExecutor : public AbstractExecutor {
         } else if (col.type == TYPE_FLOAT) {
             float v = std::numeric_limits<float>::max();
             memcpy(key + offset, &v, sizeof(float));
+        } else if (col.type == TYPE_BIGINT || col.type == TYPE_DATETIME) {
+            int64_t v = std::numeric_limits<int64_t>::max();
+            memcpy(key + offset, &v, sizeof(int64_t));
         } else {
             memset(key + offset, 0xff, col.len);
         }
