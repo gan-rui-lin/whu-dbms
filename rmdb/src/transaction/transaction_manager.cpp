@@ -12,6 +12,26 @@ See the Mulan PSL v2 for more details. */
 #include "record/rm_file_handle.h"
 #include "system/sm_manager.h"
 
+namespace {
+std::vector<char> make_index_key(const RmRecord &record, const IndexMeta &index) {
+    std::vector<char> key(index.col_tot_len);
+    int offset = 0;
+    for (const auto &col : index.cols) {
+        memcpy(key.data() + offset, record.data + col.offset, col.len);
+        offset += col.len;
+    }
+    return key;
+}
+
+void clear_write_set(Transaction *txn) {
+    auto write_set = txn->get_write_set();
+    while (!write_set->empty()) {
+        delete write_set->back();
+        write_set->pop_back();
+    }
+}
+}  // namespace
+
 std::unordered_map<txn_id_t, Transaction *> TransactionManager::txn_map = {};
 
 /**
@@ -55,6 +75,48 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
     (void)log_manager;
     if (txn == nullptr) return;
     txn->set_state(TransactionState::ABORTED);
+    auto write_set = txn->get_write_set();
+    while (!write_set->empty()) {
+        std::unique_ptr<WriteRecord> write(write_set->back());
+        write_set->pop_back();
+
+        const std::string &table_name = write->GetTableName();
+        auto &table = sm_manager_->db_.get_table(table_name);
+        auto *file = sm_manager_->fhs_.at(table_name).get();
+        const Rid rid = write->GetRid();
+
+        if (write->GetWriteType() == WType::INSERT_TUPLE) {
+            auto record = file->get_record(rid, nullptr);
+            for (const auto &index : table.indexes) {
+                auto name = sm_manager_->get_ix_manager()->get_index_name(table_name, index.cols);
+                auto key = make_index_key(*record, index);
+                sm_manager_->ihs_.at(name)->delete_entry(key.data(), txn);
+            }
+            file->delete_record(rid, nullptr);
+        } else if (write->GetWriteType() == WType::DELETE_TUPLE) {
+            RmRecord &record = write->GetRecord();
+            file->insert_record(rid, record.data);
+            for (const auto &index : table.indexes) {
+                auto name = sm_manager_->get_ix_manager()->get_index_name(table_name, index.cols);
+                auto key = make_index_key(record, index);
+                sm_manager_->ihs_.at(name)->insert_entry(key.data(), rid, txn);
+            }
+        } else {
+            auto current = file->get_record(rid, nullptr);
+            RmRecord &old_record = write->GetRecord();
+            for (const auto &index : table.indexes) {
+                auto name = sm_manager_->get_ix_manager()->get_index_name(table_name, index.cols);
+                auto current_key = make_index_key(*current, index);
+                auto old_key = make_index_key(old_record, index);
+                if (memcmp(current_key.data(), old_key.data(), index.col_tot_len) != 0) {
+                    sm_manager_->ihs_.at(name)->delete_entry(current_key.data(), txn);
+                    sm_manager_->ihs_.at(name)->insert_entry(old_key.data(), rid, txn);
+                }
+            }
+            file->update_record(rid, old_record.data, nullptr);
+        }
+    }
+
     if (txn->get_lock_set() != nullptr) {
         txn->get_lock_set()->clear();
     }

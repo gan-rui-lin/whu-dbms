@@ -66,6 +66,8 @@ class UpdateExecutor : public AbstractExecutor {
                 }
             }
 
+            context_->txn_->append_write_record(new WriteRecord(WType::UPDATE_TUPLE, tab_name_, rid, *old_rec));
+
             for (auto &index : tab_.indexes) {
                 auto ih = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols)).get();
                 std::vector<char> old_key(index.col_tot_len);
