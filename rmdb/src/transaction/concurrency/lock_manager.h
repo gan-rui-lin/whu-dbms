@@ -62,6 +62,12 @@ public:
     bool unlock(Transaction* txn, LockDataId lock_data_id);
 
 private:
+    bool request_lock(Transaction *txn, const LockDataId &lock_data_id, LockMode mode);
+    static bool compatible(LockMode requested, LockMode granted);
+    static bool subsumes(LockMode held, LockMode requested);
+    static LockMode combine(LockMode held, LockMode requested);
+    static GroupLockMode group_mode(const LockRequestQueue &queue);
+
     std::mutex latch_;      // 用于锁表的并发
     std::unordered_map<LockDataId, LockRequestQueue> lock_table_;   // 全局锁表
 };

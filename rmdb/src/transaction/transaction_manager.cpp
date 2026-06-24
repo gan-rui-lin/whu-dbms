@@ -62,7 +62,8 @@ void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
     if (txn == nullptr) return;
     txn->set_state(TransactionState::COMMITTED);
     if (txn->get_lock_set() != nullptr) {
-        txn->get_lock_set()->clear();
+        std::vector<LockDataId> locks(txn->get_lock_set()->begin(), txn->get_lock_set()->end());
+        for (const auto &lock : locks) lock_manager_->unlock(txn, lock);
     }
 }
 
@@ -118,6 +119,7 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
     }
 
     if (txn->get_lock_set() != nullptr) {
-        txn->get_lock_set()->clear();
+        std::vector<LockDataId> locks(txn->get_lock_set()->begin(), txn->get_lock_set()->end());
+        for (const auto &lock : locks) lock_manager_->unlock(txn, lock);
     }
 }

@@ -74,6 +74,7 @@ class IndexScanExecutor : public AbstractExecutor {
         index_col_names_ = index_col_names; 
         index_meta_ = *(tab_.get_index_meta(index_col_names_));
         fh_ = sm_manager_->fhs_.at(tab_name_).get();
+        context_->lock_mgr_->lock_shared_on_table(context_->txn_, fh_->GetFd());
         ih_ = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_meta_.cols)).get();
         cols_ = tab_.cols;
         len_ = cols_.back().offset + cols_.back().len;

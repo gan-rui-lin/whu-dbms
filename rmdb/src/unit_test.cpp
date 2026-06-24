@@ -35,6 +35,7 @@ See the Mulan PSL v2 for more details. */
 #include "gtest/gtest.h"
 #include "replacer/lru_replacer.h"
 #include "storage/disk_manager.h"
+#include "transaction/concurrency/lock_manager.h"
 
 const std::string TEST_DB_NAME = "BufferPoolManagerTest_db";  // 以数据库名作为根目录
 const std::string TEST_FILE_NAME = "basic";                   // 测试文件的名字
@@ -660,4 +661,21 @@ TEST(RecordManagerTest, SimpleTest) {
     // clean up
     rm_manager->close_file(file_handle.get());
     rm_manager->destroy_file(filename);
+}
+
+TEST(TransactionLockTest, NoWaitAndTwoPhaseLocking) {
+    LockManager lock_manager;
+    Transaction reader(100);
+    Transaction writer(101);
+    reader.set_state(TransactionState::GROWING);
+    writer.set_state(TransactionState::GROWING);
+
+    ASSERT_TRUE(lock_manager.lock_shared_on_table(&reader, 7));
+    ASSERT_TRUE(lock_manager.lock_shared_on_table(&writer, 7));
+    EXPECT_THROW(lock_manager.lock_exclusive_on_table(&writer, 7), TransactionAbortException);
+
+    ASSERT_TRUE(lock_manager.unlock(&reader, LockDataId(7, LockDataType::TABLE)));
+    EXPECT_THROW(lock_manager.lock_shared_on_table(&reader, 8), TransactionAbortException);
+
+    ASSERT_TRUE(lock_manager.unlock(&writer, LockDataId(7, LockDataType::TABLE)));
 }
