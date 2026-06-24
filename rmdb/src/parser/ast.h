@@ -161,10 +161,10 @@ struct AggFunc : public Col {
     bool is_star;
 
     AggFunc(AggFuncType func_type_, std::shared_ptr<Col> col_, std::string alias_, bool is_star_ = false) :
-            Col("", std::move(alias_)),
+            Col("", alias_),
             func_type(func_type_),
             col(std::move(col_)),
-            alias(std::move(col_name)),
+            alias(std::move(alias_)),
             is_star(is_star_) {}
 };
 

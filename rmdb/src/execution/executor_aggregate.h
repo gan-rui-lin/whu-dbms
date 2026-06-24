@@ -47,6 +47,7 @@ class AggregateExecutor : public AbstractExecutor {
 
     void beginTuple() override {
         result_ = std::make_unique<RmRecord>(len_);
+        memset(result_->data, 0, len_);
         std::vector<bool> initialized(agg_calls_.size(), false);
         std::vector<double> sums(agg_calls_.size(), 0);
         std::vector<int> counts(agg_calls_.size(), 0);
