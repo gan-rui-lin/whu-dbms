@@ -41,6 +41,7 @@ typedef enum PlanTag{
     T_IndexScan,
     T_NestLoop,
     T_Sort,
+    T_Limit,
     T_Aggregate,
     T_Projection
 } PlanTag;
@@ -133,6 +134,21 @@ class SortPlan : public Plan
         std::shared_ptr<Plan> subplan_;
         std::vector<TabCol> sel_cols_;
         std::vector<bool> is_descs_;
+        int limit_;
+        
+};
+
+class LimitPlan : public Plan
+{
+    public:
+        LimitPlan(PlanTag tag, std::shared_ptr<Plan> subplan, int limit)
+        {
+            Plan::tag = tag;
+            subplan_ = std::move(subplan);
+            limit_ = limit;
+        }
+        ~LimitPlan(){}
+        std::shared_ptr<Plan> subplan_;
         int limit_;
         
 };

@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "execution/executor_delete.h"
 #include "execution/executor_index_scan.h"
 #include "execution/executor_insert.h"
+#include "execution/executor_limit.h"
 #include "execution/executor_nestedloop_join.h"
 #include "execution/executor_projection.h"
 #include "execution/executor_seq_scan.h"
@@ -159,6 +160,10 @@ std::shared_ptr<Plan> Planner::physical_optimization(std::shared_ptr<Query> quer
 
     // 处理orderby
     plan = generate_sort_plan(query, std::move(plan)); 
+    auto select = std::dynamic_pointer_cast<ast::SelectStmt>(query->parse);
+    if (select != nullptr && !select->has_sort && select->limit >= 0) {
+        plan = std::make_shared<LimitPlan>(T_Limit, std::move(plan), select->limit);
+    }
 
     return plan;
 }
