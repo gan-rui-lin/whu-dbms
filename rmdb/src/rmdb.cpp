@@ -9,8 +9,6 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #include <netinet/in.h>
-#include <readline/history.h>
-#include <readline/readline.h>
 #include <algorithm>
 #include <setjmp.h>
 #include <signal.h>
@@ -133,8 +131,12 @@ void *client_handler(void *sock_fd) {
         // 用于判断是否已经调用了yy_delete_buffer来删除buf
         bool finish_analyze = false;
         pthread_mutex_lock(buffer_mutex);
+        ast::parse_tree = nullptr;
+        ast::scanner_int_out_of_range = false;
+        ast::scanner_last_type = ast::SV_TYPE_INT;
         YY_BUFFER_STATE buf = yy_scan_string(data_recv);
-        if (yyparse() == 0) {
+        int parse_ret = yyparse();
+        if (parse_ret == 0 && !ast::scanner_int_out_of_range) {
             if (ast::parse_tree != nullptr) {
                 try {
                     // analyze and rewrite
@@ -206,6 +208,19 @@ void *client_handler(void *sock_fd) {
                     outfile.close();
                 }
             }
+        } else {
+            std::string msg = ast::scanner_int_out_of_range ? "Error: integer literal out of range" : "Error: parse error";
+            std::cerr << msg << std::endl;
+            int msg_len = std::min(static_cast<int>(msg.size()), BUFFER_LENGTH - 2);
+            memcpy(data_send, msg.c_str(), msg_len);
+            data_send[msg_len] = '\n';
+            data_send[msg_len + 1] = '\0';
+            offset = msg_len + 1;
+
+            std::fstream outfile;
+            outfile.open("output.txt", std::ios::out | std::ios::app);
+            outfile << "failure\n";
+            outfile.close();
         }
         if(finish_analyze == false) {
             yy_delete_buffer(buf);

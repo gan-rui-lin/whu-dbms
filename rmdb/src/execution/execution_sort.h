@@ -43,6 +43,11 @@ class SortExecutor : public AbstractExecutor {
             float r = *reinterpret_cast<const float *>(rhs);
             return (l < r) ? -1 : (l > r ? 1 : 0);
         }
+        if (col.type == TYPE_BIGINT || col.type == TYPE_DATETIME) {
+            int64_t l = *reinterpret_cast<const int64_t *>(lhs);
+            int64_t r = *reinterpret_cast<const int64_t *>(rhs);
+            return (l < r) ? -1 : (l > r ? 1 : 0);
+        }
         return memcmp(lhs, rhs, col.len);
     }
 

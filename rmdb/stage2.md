@@ -285,4 +285,3 @@ select t.id,t_name,d_name from t,d where t.id = d.id;
 测试输出要求：
 
 本题目的输出要求写入数据库文件夹下的output.txt文件中，例如测试数据库名称为execution_test_db，则在测试时使用./bin/rmdb execution_test_db命令来启动服务端，对应输出应写入buid/execution_test_db/output.txt文件中。
-

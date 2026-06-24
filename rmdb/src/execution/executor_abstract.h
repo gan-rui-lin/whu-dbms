@@ -64,6 +64,10 @@ class AbstractExecutor {
             float l = *reinterpret_cast<const float *>(lhs);
             float r = *reinterpret_cast<const float *>(rhs);
             cmp = (l < r) ? -1 : (l > r ? 1 : 0);
+        } else if (type == TYPE_BIGINT || type == TYPE_DATETIME) {
+            int64_t l = *reinterpret_cast<const int64_t *>(lhs);
+            int64_t r = *reinterpret_cast<const int64_t *>(rhs);
+            cmp = (l < r) ? -1 : (l > r ? 1 : 0);
         } else {
             cmp = memcmp(lhs, rhs, len);
         }
