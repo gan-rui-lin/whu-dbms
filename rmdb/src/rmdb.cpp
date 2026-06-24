@@ -11,6 +11,7 @@ See the Mulan PSL v2 for more details. */
 #include <netinet/in.h>
 #include <readline/history.h>
 #include <readline/readline.h>
+#include <algorithm>
 #include <setjmp.h>
 #include <signal.h>
 #include <unistd.h>
@@ -28,6 +29,7 @@ See the Mulan PSL v2 for more details. */
 #define MAX_CONN_LIMIT 8
 
 static bool should_exit = false;
+static int server_listen_fd = -1;
 
 // 构建全局所需的管理器对象
 auto disk_manager = std::make_unique<DiskManager>();
@@ -104,6 +106,16 @@ void *client_handler(void *sock_fd) {
             std::cout << "Client exit." << std::endl;
             break;
         }
+        if (strcmp(data_recv, "safe_exit") == 0) {
+            std::cout << "safe_exit requested." << std::endl;
+            should_exit = true;
+            if (server_listen_fd >= 0) {
+                shutdown(server_listen_fd, SHUT_RDWR);
+                close(server_listen_fd);
+                server_listen_fd = -1;
+            }
+            break;
+        }
         if (strcmp(data_recv, "crash") == 0) {
             std::cout << "Server crash" << std::endl;
             exit(1);
@@ -165,6 +177,33 @@ void *client_handler(void *sock_fd) {
                     outfile.open("output.txt",std::ios::out | std::ios::app);
                     outfile << "failure\n";
                     outfile.close();
+                } catch (std::exception &e) {
+                    std::cerr << e.what() << std::endl;
+
+                    std::string msg = std::string("Error: ") + e.what();
+                    int msg_len = std::min(static_cast<int>(msg.size()), BUFFER_LENGTH - 2);
+                    memcpy(data_send, msg.c_str(), msg_len);
+                    data_send[msg_len] = '\n';
+                    data_send[msg_len + 1] = '\0';
+                    offset = msg_len + 1;
+
+                    std::fstream outfile;
+                    outfile.open("output.txt", std::ios::out | std::ios::app);
+                    outfile << "failure\n";
+                    outfile.close();
+                } catch (...) {
+                    std::cerr << "Unknown execution error" << std::endl;
+
+                    std::string msg = "Error: unknown execution error";
+                    memcpy(data_send, msg.c_str(), msg.size());
+                    data_send[msg.size()] = '\n';
+                    data_send[msg.size() + 1] = '\0';
+                    offset = static_cast<int>(msg.size()) + 1;
+
+                    std::fstream outfile;
+                    outfile.open("output.txt", std::ios::out | std::ios::app);
+                    outfile << "failure\n";
+                    outfile.close();
                 }
             }
         }
@@ -204,6 +243,7 @@ void start_server() {
     // 初始化连接
     sockfd_server = socket(AF_INET, SOCK_STREAM, 0);  // ipv4,TCP
     assert(sockfd_server != -1);
+    server_listen_fd = sockfd_server;
     int val = 1;
     setsockopt(sockfd_server, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
 
@@ -253,8 +293,11 @@ void start_server() {
 
     // Clear
     std::cout << " Try to close all client-connection.\n";
-    int ret = shutdown(sockfd_server, SHUT_WR);  // shut down the all or part of a full-duplex connection.
-    if(ret == -1) { printf("%s\n", strerror(errno)); }
+    int ret = 0;
+    if (server_listen_fd >= 0) {
+        ret = shutdown(sockfd_server, SHUT_WR);  // shut down the all or part of a full-duplex connection.
+        if(ret == -1) { printf("%s\n", strerror(errno)); }
+    }
 //    assert(ret != -1);
     sm_manager->close_db();
     std::cout << " DB has been closed.\n";
