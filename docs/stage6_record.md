@@ -290,11 +290,13 @@ In storage_test3, server stops running
 In storage_test4, server stops running
 ```
 
-本地公开的 BufferPoolManager 和 StorageTest 可以通过，但隐藏测试中服务端直接停止，说明问题不是普通结果不匹配，而是底层抛异常或进程崩溃。
+本地公开的 BufferPoolManager 和 StorageTest 可以通过，但隐藏测试中服务端直接停止，说明问题不是普通结果不匹配，而是底层抛异常、服务端生命周期控制不符合测试脚本预期，或者某些非 `RMDBError` 异常没有被捕获。
 
 ### 原因分析
 
-重点排查了 `DiskManager::read_page()` 和 `BufferPoolManager` 的页面换入换出逻辑。原实现中：
+排查分成两轮。
+
+第一轮重点看 `DiskManager::read_page()` 和 `BufferPoolManager` 的页面换入换出逻辑。原实现中：
 
 ```cpp
 if (bytes_read <= 0) throw InternalError("DiskManager::read_page Error");
@@ -304,9 +306,14 @@ if (bytes_read <= 0) throw InternalError("DiskManager::read_page Error");
 
 数据库页式存储中，读取文件尾之外或短读的新页，更合理的行为是把剩余部分视作 0 填充页。
 
+第二轮重新对照参考代码和测试脚本，发现还有两个会被平台表现为 `server stops running` 的服务端层问题：
+
+1. 参考测试脚本使用 `safe_exit` 通知服务端优雅退出，但当前 `rmdb.cpp` 只识别 `exit`。本地按参考脚本跑用例时，`safe_exit` 会被当作普通 SQL 解析失败，服务端不会退出，后续测试可能遇到端口占用或被判定为服务端状态异常。
+2. `client_handler()` 只捕获了 `TransactionAbortException` 和 `RMDBError`。如果隐藏用例触发 `std::out_of_range`、`std::bad_alloc`、普通 `std::exception` 或未知异常，线程会异常终止；平台侧只能看到 server stops running，而不是一条正常的 `failure` 输出。
+
 ### 解决方案
 
-修改 `DiskManager::read_page()`：
+第一部分是修复存储短读。修改 `DiskManager::read_page()`：
 
 1. `pread()` 被信号中断时继续读。
 2. 真正系统错误才抛异常。
@@ -319,6 +326,13 @@ if (bytes_read <= 0) throw InternalError("DiskManager::read_page Error");
 2. 再逐个写回和清理。
 3. 避免遍历 `unordered_map` 时边遍历边删除带来的不稳定。
 4. `delete_all_pages(fd)` 清理前写回页面，保证关闭文件前数据落盘。
+
+第二部分是加固服务端：
+
+1. 在 `rmdb.cpp` 中识别 `safe_exit`，设置 `should_exit = true`，关闭监听 socket，让 `accept()` 退出阻塞。
+2. 记录 `server_listen_fd`，避免服务端收尾时重复 shutdown 已关闭的监听 fd。
+3. 在 SQL 执行 try-catch 中增加 `std::exception` 和 `catch (...)` 兜底。
+4. 对未预料异常写入 `failure\n` 到 `output.txt`，并把错误信息返回 client，而不是让服务端线程直接异常退出。
 
 ### 验证
 
@@ -338,9 +352,20 @@ StorageTest.SimpleTest
 RecordManagerTest.SimpleTest
 ```
 
-并且重新更新 `stage6_submit.zip`，确保压缩包中包含本次修复涉及的：
+同时按参考 `unit_tests/run_case.sh` 的方式验证了 `safe_exit`：
 
 ```text
+client 发送 safe_exit
+服务端退出
+8765 端口释放
+```
+
+并且重新运行参考包中的 `index/query_case`，输出与 `gold.txt` 一致，服务端可以通过 `safe_exit` 正常收尾。
+
+最后重新更新 `stage6_submit.zip`，确保压缩包中包含本次修复涉及的：
+
+```text
+src/rmdb.cpp
 src/storage/buffer_pool_manager.cpp
 src/storage/buffer_pool_manager.h
 src/storage/disk_manager.cpp
@@ -356,6 +381,8 @@ src/storage/disk_manager.h
 3. 空指针
 4. 缓冲池页表残留
 5. fd 关闭和复用
+6. 测试脚本使用的服务端退出协议
+7. `std::exception` 或未知异常没有被捕获
 
 ## 10. 本阶段总结
 
@@ -370,5 +397,6 @@ Stage 6 表面上是“加索引”，实际牵涉到存储、索引、优化器
 7. 回表后继续执行完整 where 过滤。
 8. 关闭文件时清理 buffer pool 中对应 fd 的页面。
 9. 磁盘短读按零页处理，避免隐藏 storage 测试直接打停 server。
+10. 服务端支持测试脚本使用的 `safe_exit`，并对非 `RMDBError` 异常做兜底，避免平台只看到 server stops running。
 
-这几个点中，最容易被忽略的是第 7、8、9 点：索引扫描不是最终过滤结果，fd 不是稳定文件身份，EOF 也不一定代表数据库页读取失败。
+这几个点中，最容易被忽略的是第 7、8、9、10 点：索引扫描不是最终过滤结果，fd 不是稳定文件身份，EOF 不一定代表数据库页读取失败，服务端生命周期也会影响平台对用例是否通过的判断。
