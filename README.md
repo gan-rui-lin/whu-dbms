@@ -8,8 +8,7 @@
 .
 ├── docs/                 阶段题面、实现指南和问题记录
 ├── rmdb/                 RMDB 数据库内核项目源码
-├── submissions_fixed/    本地生成的提交压缩包
-├── refrence.zip          本地参考提交包，仅用于对照排查
+├── stage_submit.zip      本地生成的提交压缩包
 ├── .gitignore            忽略本地包、构建产物、运行数据库和日志
 └── README.md             当前仓库说明
 ```
@@ -55,29 +54,6 @@
 - `recovery/`：日志和恢复相关框架。
 - `rmdb.cpp`：服务端入口。
 - `unit_test.cpp`：本地单元测试入口。
-
-## submissions_fixed/
-
-`submissions_fixed/` 保存本地打包出来的提交版压缩包，例如：
-
-```text
-submissions_fixed/stage_submit.zip
-```
-
-当前提交包按完整 RMDB 项目根目录打包，解压后根目录应直接包含：
-
-```text
-CMakeLists.txt
-src/
-deps/
-rmdb_client/
-```
-
-这样可以适配直接在解压根目录运行 CMake 的评测脚本。
-
-## refrence.zip
-
-`refrence.zip` 是本地参考提交包，只用于对照排查平台报错和提交包结构。它不是当前提交版源码来源，也不应该进入 git 历史。
 
 ## 常用命令
 
