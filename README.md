@@ -69,9 +69,3 @@ cmake --build rmdb/build -j2
 ```bash
 ./rmdb/build/bin/unit_test --gtest_filter='StorageTest.*:BufferPoolManagerTest.*:BufferPoolManagerConcurrencyTest.*:RecordManagerTest.SimpleTest'
 ```
-
-检查提交包结构：
-
-```bash
-unzip -l submissions_fixed/stage_submit.zip | head
-```
