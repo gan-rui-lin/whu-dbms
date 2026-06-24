@@ -90,6 +90,7 @@ page_id_t IxNodeHandle::internal_lookup(const char *key) {
  */
 void IxNodeHandle::insert_pairs(int pos, const char *key, const Rid *rid, int n) {
     assert(pos >= 0 && pos <= get_size());
+    assert(n >= 0 && get_size() + n <= get_max_size());
     int move_num = get_size() - pos;
     if (move_num > 0) {
         memmove(get_key(pos + n), get_key(pos), move_num * file_hdr->col_tot_len_);
@@ -154,10 +155,11 @@ IxIndexHandle::IxIndexHandle(DiskManager *disk_manager, BufferPoolManager *buffe
     disk_manager_->read_page(fd, IX_FILE_HDR_PAGE, buf, PAGE_SIZE);
     file_hdr_ = new IxFileHdr();
     file_hdr_->deserialize(buf);
+    delete[] buf;
     
     // disk_manager管理的fd对应的文件中，设置从file_hdr_->num_pages开始分配page_no
     int now_page_no = disk_manager_->get_fd2pageno(fd);
-    disk_manager_->set_fd2pageno(fd, now_page_no + 1);
+    disk_manager_->set_fd2pageno(fd, std::max(now_page_no, file_hdr_->num_pages_));
 }
 
 /**
@@ -173,6 +175,9 @@ std::pair<IxNodeHandle *, bool> IxIndexHandle::find_leaf_page(const char *key, O
                                                             Transaction *transaction, bool find_first) {
     (void)operation;
     (void)transaction;
+    if (is_empty()) {
+        return std::make_pair(nullptr, false);
+    }
     IxNodeHandle *node = fetch_node(file_hdr_->root_page_);
     while (!node->is_leaf_page()) {
         page_id_t child = find_first ? node->value_at(0) : node->internal_lookup(key);
@@ -194,6 +199,9 @@ bool IxIndexHandle::get_value(const char *key, std::vector<Rid> *result, Transac
     (void)transaction;
     auto [leaf, root_is_latched] = find_leaf_page(key, Operation::FIND, transaction);
     (void)root_is_latched;
+    if (leaf == nullptr) {
+        return false;
+    }
     Rid *rid = nullptr;
     bool found = leaf->leaf_lookup(key, &rid);
     if (found) result->push_back(*rid);
@@ -311,16 +319,21 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
  */
 bool IxIndexHandle::delete_entry(const char *key, Transaction *transaction) {
     auto [leaf, root_is_latched] = find_leaf_page(key, Operation::DELETE, transaction);
-    bool root_latched = root_is_latched;
+    (void)root_is_latched;
+    if (leaf == nullptr) {
+        return false;
+    }
     int old_size = leaf->get_size();
+    int old_pos = leaf->lower_bound(key);
     leaf->remove(key);
     if (leaf->get_size() == old_size) {
         buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
         return false;
     }
-    bool should_delete = coalesce_or_redistribute(leaf, transaction, &root_latched);
-    if (should_delete) release_node_handle(*leaf);
-    else buffer_pool_manager_->unpin_page(leaf->get_page_id(), true);
+    if (leaf->get_size() > 0 && old_pos == 0) {
+        maintain_parent(leaf);
+    }
+    buffer_pool_manager_->unpin_page(leaf->get_page_id(), true);
     return true;
 }
 
@@ -479,6 +492,9 @@ Rid IxIndexHandle::get_rid(const Iid &iid) const {
 Iid IxIndexHandle::lower_bound(const char *key) {
     auto [leaf, root_is_latched] = find_leaf_page(key, Operation::FIND, nullptr);
     (void)root_is_latched;
+    if (leaf == nullptr) {
+        return leaf_end();
+    }
     int pos = leaf->lower_bound(key);
     page_id_t page_no = leaf->get_page_no();
     while (pos == leaf->get_size() && page_no != file_hdr_->last_leaf_) {
@@ -502,6 +518,9 @@ Iid IxIndexHandle::lower_bound(const char *key) {
 Iid IxIndexHandle::upper_bound(const char *key) {
     auto [leaf, root_is_latched] = find_leaf_page(key, Operation::FIND, nullptr);
     (void)root_is_latched;
+    if (leaf == nullptr) {
+        return leaf_end();
+    }
     int pos = leaf->upper_bound(key);
     page_id_t page_no = leaf->get_page_no();
     while (pos == leaf->get_size() && page_no != file_hdr_->last_leaf_) {

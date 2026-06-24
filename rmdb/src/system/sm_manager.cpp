@@ -153,11 +153,12 @@ void SmManager::show_tables(Context* context) {
 
 void SmManager::show_index(const std::string& tab_name, Context* context) {
     TabMeta &tab = db_.get_table(tab_name);
+    if (tab.indexes.empty()) {
+        return;
+    }
     std::fstream outfile;
     outfile.open("output.txt", std::ios::out | std::ios::app);
     RecordPrinter printer(3);
-    printer.print_separator(context);
-    printer.print_record({"table_name", "unique", "column_name"}, context);
     printer.print_separator(context);
     for (auto &index : tab.indexes) {
         std::string cols = "(";
@@ -270,16 +271,26 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
     }
     ix_manager_->create_index(tab_name, cols);
     auto ih = ix_manager_->open_index(tab_name, cols);
-    RmFileHandle *fh = fhs_.at(tab_name).get();
-    for (RmScan scan(fh); !scan.is_end(); scan.next()) {
-        auto rec = fh->get_record(scan.rid(), context);
-        std::vector<char> key(col_tot_len);
-        int offset = 0;
-        for (auto &col : cols) {
-            memcpy(key.data() + offset, rec->data + col.offset, col.len);
-            offset += col.len;
+    try {
+        RmFileHandle *fh = fhs_.at(tab_name).get();
+        for (RmScan scan(fh); !scan.is_end(); scan.next()) {
+            auto rec = fh->get_record(scan.rid(), context);
+            std::vector<char> key(col_tot_len);
+            int offset = 0;
+            for (auto &col : cols) {
+                memcpy(key.data() + offset, rec->data + col.offset, col.len);
+                offset += col.len;
+            }
+            std::vector<Rid> result;
+            if (ih->get_value(key.data(), &result, context->txn_)) {
+                throw IndexExistsError(tab_name, col_names);
+            }
+            ih->insert_entry(key.data(), scan.rid(), context->txn_);
         }
-        ih->insert_entry(key.data(), scan.rid(), context->txn_);
+    } catch (...) {
+        ix_manager_->close_index(ih.get());
+        ix_manager_->destroy_index(tab_name, cols);
+        throw;
     }
     IndexMeta index_meta{.tab_name = tab_name, .col_tot_len = col_tot_len,
                          .col_num = static_cast<int>(cols.size()), .cols = cols};
