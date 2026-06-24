@@ -99,14 +99,3 @@ cmake --build rmdb/build -j2
 ```bash
 unzip -l submissions_fixed/stage_submit.zip | head
 ```
-
-## Git 忽略策略
-
-`.gitignore` 主要忽略：
-
-- macOS/editor 临时文件。
-- `refrence.zip`、`reference.zip`、`submissions/`、`submissions_fixed/` 等本地包。
-- CMake 构建目录，如 `build/`、`rmdb/build/`。
-- 运行测试生成的数据库目录、日志和 core dump。
-
-如果需要保留某个提交包作为交付物，可以临时调整 `.gitignore` 或使用 `git add -f`，但默认不把生成压缩包纳入版本管理。
