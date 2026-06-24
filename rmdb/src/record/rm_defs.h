@@ -49,6 +49,8 @@ struct RmRecord {
     };
 
     RmRecord &operator=(const RmRecord& other) {
+        if (this == &other) return *this;
+        if (allocated_) delete[] data;
         size = other.size;
         data = new char[size];
         memcpy(data, other.data, size);
@@ -80,6 +82,7 @@ struct RmRecord {
         }
         data = new char[size];
         memcpy(data, data_ + sizeof(int), size);
+        allocated_ = true;
     }
 
     ~RmRecord() {

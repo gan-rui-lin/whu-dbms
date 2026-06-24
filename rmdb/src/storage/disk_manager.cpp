@@ -249,3 +249,9 @@ void DiskManager::write_log(char *log_data, int size) {
         throw UnixError();
     }
 }
+
+void DiskManager::reset_log() {
+    if (log_fd_ == -1) log_fd_ = open_file(LOG_FILE_NAME);
+    if (ftruncate(log_fd_, 0) < 0) throw UnixError();
+    if (lseek(log_fd_, 0, SEEK_SET) < 0) throw UnixError();
+}

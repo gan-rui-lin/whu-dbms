@@ -40,6 +40,11 @@ class DeleteExecutor : public AbstractExecutor {
     std::unique_ptr<RmRecord> Next() override {
         for (auto &rid : rids_) {
             auto rec = fh_->get_record(rid, context_);
+            if (context_->log_mgr_ != nullptr) {
+                DeleteLogRecord log(context_->txn_->get_transaction_id(), *rec, rid, tab_name_);
+                log.prev_lsn_ = context_->txn_->get_prev_lsn();
+                context_->txn_->set_prev_lsn(context_->log_mgr_->add_log_to_buffer(&log));
+            }
             context_->txn_->append_write_record(new WriteRecord(WType::DELETE_TUPLE, tab_name_, rid, *rec));
             for (auto &index : tab_.indexes) {
                 auto ih = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols)).get();

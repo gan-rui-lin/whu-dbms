@@ -41,7 +41,6 @@ std::unordered_map<txn_id_t, Transaction *> TransactionManager::txn_map = {};
  * @param {LogManager*} log_manager 日志管理器指针
  */
 Transaction * TransactionManager::begin(Transaction* txn, LogManager* log_manager) {
-    (void)log_manager;
     if (txn == nullptr) {
         txn = new Transaction(next_txn_id_++);
     }
@@ -49,6 +48,12 @@ Transaction * TransactionManager::begin(Transaction* txn, LogManager* log_manage
     txn->set_state(TransactionState::GROWING);
     std::unique_lock<std::mutex> lock(latch_);
     txn_map[txn->get_transaction_id()] = txn;
+    lock.unlock();
+    if (log_manager != nullptr) {
+        BeginLogRecord record(txn->get_transaction_id());
+        record.prev_lsn_ = txn->get_prev_lsn();
+        txn->set_prev_lsn(log_manager->add_log_to_buffer(&record));
+    }
     return txn;
 }
 
@@ -58,13 +63,18 @@ Transaction * TransactionManager::begin(Transaction* txn, LogManager* log_manage
  * @param {LogManager*} log_manager 日志管理器指针
  */
 void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
-    (void)log_manager;
     if (txn == nullptr) return;
-    txn->set_state(TransactionState::COMMITTED);
+    if (log_manager != nullptr) {
+        CommitLogRecord record(txn->get_transaction_id());
+        record.prev_lsn_ = txn->get_prev_lsn();
+        txn->set_prev_lsn(log_manager->add_log_to_buffer(&record));
+    }
+    clear_write_set(txn);
     if (txn->get_lock_set() != nullptr) {
         std::vector<LockDataId> locks(txn->get_lock_set()->begin(), txn->get_lock_set()->end());
         for (const auto &lock : locks) lock_manager_->unlock(txn, lock);
     }
+    txn->set_state(TransactionState::COMMITTED);
 }
 
 /**
@@ -73,7 +83,6 @@ void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
  * @param {LogManager} *log_manager 日志管理器指针
  */
 void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
-    (void)log_manager;
     if (txn == nullptr) return;
     txn->set_state(TransactionState::ABORTED);
     auto write_set = txn->get_write_set();
@@ -121,5 +130,10 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
     if (txn->get_lock_set() != nullptr) {
         std::vector<LockDataId> locks(txn->get_lock_set()->begin(), txn->get_lock_set()->end());
         for (const auto &lock : locks) lock_manager_->unlock(txn, lock);
+    }
+    if (log_manager != nullptr) {
+        AbortLogRecord record(txn->get_transaction_id());
+        record.prev_lsn_ = txn->get_prev_lsn();
+        txn->set_prev_lsn(log_manager->add_log_to_buffer(&record));
     }
 }

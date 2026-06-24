@@ -35,6 +35,7 @@ See the Mulan PSL v2 for more details. */
 #include "gtest/gtest.h"
 #include "replacer/lru_replacer.h"
 #include "storage/disk_manager.h"
+#include "recovery/log_manager.h"
 #include "transaction/concurrency/lock_manager.h"
 
 const std::string TEST_DB_NAME = "BufferPoolManagerTest_db";  // 以数据库名作为根目录
@@ -678,4 +679,34 @@ TEST(TransactionLockTest, NoWaitAndTwoPhaseLocking) {
     EXPECT_THROW(lock_manager.lock_shared_on_table(&reader, 8), TransactionAbortException);
 
     ASSERT_TRUE(lock_manager.unlock(&writer, LockDataId(7, LockDataType::TABLE)));
+}
+
+TEST(LogRecordTest, RoundTripDmlRecords) {
+    Rid rid{3, 5};
+    char old_data[] = "old-value";
+    char new_data[] = "new-value";
+    RmRecord old_record(sizeof(old_data), old_data);
+    RmRecord new_record(sizeof(new_data), new_data);
+
+    DeleteLogRecord delete_log(9, old_record, rid, "student");
+    delete_log.lsn_ = 11;
+    std::vector<char> delete_bytes(delete_log.log_tot_len_);
+    delete_log.serialize(delete_bytes.data());
+    DeleteLogRecord decoded_delete;
+    decoded_delete.deserialize(delete_bytes.data());
+    EXPECT_EQ(decoded_delete.log_tid_, 9);
+    EXPECT_EQ(decoded_delete.rid_, rid);
+    EXPECT_EQ(decoded_delete.table_name_, "student");
+    EXPECT_EQ(memcmp(decoded_delete.delete_value_.data, old_data, sizeof(old_data)), 0);
+
+    UpdateLogRecord update_log(9, old_record, new_record, rid, "student");
+    update_log.lsn_ = 12;
+    std::vector<char> update_bytes(update_log.log_tot_len_);
+    update_log.serialize(update_bytes.data());
+    UpdateLogRecord decoded_update;
+    decoded_update.deserialize(update_bytes.data());
+    EXPECT_EQ(decoded_update.rid_, rid);
+    EXPECT_EQ(decoded_update.table_name_, "student");
+    EXPECT_EQ(memcmp(decoded_update.old_value_.data, old_data, sizeof(old_data)), 0);
+    EXPECT_EQ(memcmp(decoded_update.new_value_.data, new_data, sizeof(new_data)), 0);
 }

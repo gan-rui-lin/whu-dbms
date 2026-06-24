@@ -72,6 +72,11 @@ class InsertExecutor : public AbstractExecutor {
             }
             ih->insert_entry(key.data(), rid_, context_->txn_);
         }
+        if (context_->log_mgr_ != nullptr) {
+            InsertLogRecord log(context_->txn_->get_transaction_id(), rec, rid_, tab_name_);
+            log.prev_lsn_ = context_->txn_->get_prev_lsn();
+            context_->txn_->set_prev_lsn(context_->log_mgr_->add_log_to_buffer(&log));
+        }
         context_->txn_->append_write_record(new WriteRecord(WType::INSERT_TUPLE, tab_name_, rid_));
         return nullptr;
     }

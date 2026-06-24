@@ -67,6 +67,11 @@ class UpdateExecutor : public AbstractExecutor {
                 }
             }
 
+            if (context_->log_mgr_ != nullptr) {
+                UpdateLogRecord log(context_->txn_->get_transaction_id(), *old_rec, new_rec, rid, tab_name_);
+                log.prev_lsn_ = context_->txn_->get_prev_lsn();
+                context_->txn_->set_prev_lsn(context_->log_mgr_->add_log_to_buffer(&log));
+            }
             context_->txn_->append_write_record(new WriteRecord(WType::UPDATE_TUPLE, tab_name_, rid, *old_rec));
 
             for (auto &index : tab_.indexes) {

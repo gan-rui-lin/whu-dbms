@@ -69,6 +69,10 @@ Rid RmFileHandle::insert_record(char* buf, Context* context) {
  * @param {char*} buf 要插入记录的数据
  */
 void RmFileHandle::insert_record(const Rid& rid, char* buf) {
+    while (file_hdr_.num_pages <= rid.page_no) {
+        RmPageHandle new_page = create_new_page_handle();
+        buffer_pool_manager_->unpin_page(new_page.page->get_page_id(), true);
+    }
     RmPageHandle page_handle = fetch_page_handle(rid.page_no);
     if (rid.slot_no < 0 || rid.slot_no >= file_hdr_.num_records_per_page) {
         buffer_pool_manager_->unpin_page(PageId{fd_, rid.page_no}, false);
@@ -131,6 +135,20 @@ void RmFileHandle::update_record(const Rid& rid, char* buf, Context* context) {
     }
     memcpy(page_handle.get_slot(rid.slot_no), buf, file_hdr_.record_size);
     buffer_pool_manager_->unpin_page(PageId{fd_, rid.page_no}, true);
+}
+
+void RmFileHandle::rebuild_free_page_list() {
+    file_hdr_.first_free_page_no = RM_NO_PAGE;
+    for (page_id_t page_no = RM_FIRST_RECORD_PAGE; page_no < file_hdr_.num_pages; ++page_no) {
+        RmPageHandle page_handle = fetch_page_handle(page_no);
+        if (page_handle.page_hdr->num_records < file_hdr_.num_records_per_page) {
+            page_handle.page_hdr->next_free_page_no = file_hdr_.first_free_page_no;
+            file_hdr_.first_free_page_no = page_no;
+        } else {
+            page_handle.page_hdr->next_free_page_no = RM_NO_PAGE;
+        }
+        buffer_pool_manager_->unpin_page(PageId{fd_, page_no}, true);
+    }
 }
 
 /**
